@@ -6,7 +6,7 @@
 // removed so they are not replayed against the new database.
 
 import { execFile } from "node:child_process"
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { promisify } from "node:util"
 import os from "node:os"
 import path from "node:path"
@@ -31,8 +31,12 @@ export async function snapshotSqlite(dbPath) {
 export const backupProgram =
   "import sqlite3,sys; s=sqlite3.connect(sys.argv[1]); d=sqlite3.connect(sys.argv[2]); s.backup(d); d.close(); s.close()"
 
-export function replaceLocalDb(dbPath, sourceFile) {
+// Swaps in a new database from a snapshot path or an in-memory Buffer, writing
+// through a temp file so the destination is replaced atomically.
+export function replaceLocalDb(dbPath, source) {
   mkdirSync(path.dirname(dbPath), { recursive: true })
-  for (const suffix of ["", ...sidecars]) rmSync(`${dbPath}${suffix}`, { force: true })
-  copyFileSync(sourceFile, dbPath)
+  const tmp = `${dbPath}.tmp`
+  writeFileSync(tmp, Buffer.isBuffer(source) ? source : readFileSync(source))
+  for (const suffix of sidecars) rmSync(`${dbPath}${suffix}`, { force: true })
+  renameSync(tmp, dbPath)
 }

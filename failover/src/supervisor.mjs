@@ -26,6 +26,7 @@ export function createSupervisor({
   const versions = { local: undefined, cloud: undefined }
   let active = config.prefer
   let transitioning = false
+  let ticking = false
   let lastSync = 0
   let timer
 
@@ -87,13 +88,18 @@ export function createSupervisor({
 
   async function maybeReplicate() {
     if (Date.now() - lastSync < syncIntervalMs) return
-    lastSync = Date.now()
     if (!tracker.healthy(active)) return
+    // A full DB copy can outlast several tick intervals; mark the sync as
+    // started only after it finishes so a slow upload never overlaps the next.
     await runtime.sync(active)
+    lastSync = Date.now()
   }
 
   async function tick() {
-    if (transitioning) return
+    // Serialize ticks: a slow replication must never overlap the next one, and
+    // concurrent writers would interleave and corrupt the standby database.
+    if (transitioning || ticking) return
+    ticking = true
     try {
       await refreshIdentity()
       await runtime.ensureTunnel()
@@ -104,10 +110,12 @@ export function createSupervisor({
         localHealthy: tracker.healthy("local"),
         cloudHealthy: tracker.healthy("cloud"),
       })
-      if (decision.changed) return transition(decision.active)
-      return maybeReplicate()
+      if (decision.changed) return await transition(decision.active)
+      return await maybeReplicate()
     } catch (error) {
       log(`tick failed: ${error.message}`)
+    } finally {
+      ticking = false
     }
   }
 

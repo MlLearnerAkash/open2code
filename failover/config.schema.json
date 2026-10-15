@@ -7,6 +7,7 @@
     "prefer": { "enum": ["local", "cloud"], "default": "local" },
     "failback": { "type": "boolean", "default": true },
     "intervalMs": { "type": "integer", "minimum": 250, "default": 2000 },
+    "syncIntervalMs": { "type": "integer", "minimum": 0, "default": 15000 },
     "listen": {
       "type": "object",
       "properties": {

@@ -26,8 +26,10 @@ when the local one goes down, then back when it recovers.
   recovers it fails back.
 - **Continuous session sync.** The active server's SQLite database is
   periodically snapshotted (`sqlite3 .backup`, safe while the server writes) and
-  copied onto the stopped standby, so a session that starts on one side exists
-  on the other when traffic switches.
+  copied onto the stopped standby through a temp file and an atomic rename, so a
+  session that starts on one side exists on the other when traffic switches.
+  Syncs are serialized: a copy that takes longer than `syncIntervalMs` finishes
+  before the next one starts.
 
 ### Why a warm standby and not two live writers
 
@@ -43,7 +45,7 @@ not a safe thing to build on SQLite.
 ## Requirements
 
 - Node.js 20+ on the local machine (the supervisor is dependency-free ESM).
-- `sqlite3` CLI on both machines for snapshots.
+- `sqlite3` CLI (or Python 3) on both machines for snapshots.
 - `opencode` on both machines.
 - SSH access from local to cloud that works non-interactively (key-based;
   the tunnel uses `BatchMode=yes`).
@@ -103,6 +105,7 @@ curl -s http://127.0.0.1:4000/__open2code/status | jq
 | `prefer` | `local` | Side to route to while healthy; also the failback target. |
 | `failback` | `true` | Return to `prefer` when it recovers. `false` sticks to the new side. |
 | `intervalMs` | `2000` | Health-check interval. |
+| `syncIntervalMs` | `15000` | Minimum gap between database syncs. A sync that takes longer than this runs to completion before the next begins. |
 | `local.mode` | `service` | `service` uses the managed background service; `serve` runs a dedicated `opencode serve`. |
 | `local.url` / `local.password` / `local.db` | auto | Usually discovered via the `opencode` CLI. Set to override. |
 | `local.port` | `4096` | Port for `local.mode = "serve"`. |

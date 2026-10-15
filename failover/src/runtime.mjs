@@ -194,9 +194,11 @@ export function createRuntime({ config, log = () => {}, env = process.env }) {
 
   async function writeCloud(file) {
     const db = remotePath(config.cloud.db)
+    // Write to a temp file and rename so a reader (or an interrupted transfer)
+    // never sees a half-written database.
     const result = await remoteRun(
       config.cloud,
-      `mkdir -p "$(dirname ${db})"; rm -f ${db} ${db}-wal ${db}-shm; cat > ${db}`,
+      `mkdir -p "$(dirname ${db})"; rm -f ${db}.tmp ${db}-wal ${db}-shm; cat > ${db}.tmp && mv -f ${db}.tmp ${db}`,
       { input: readFileSync(file), log },
     )
     if (result.code !== 0) throw new Error(result.stderr.trim() || `ssh exited ${result.code}`)

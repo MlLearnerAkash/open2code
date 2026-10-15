@@ -16,7 +16,7 @@ if (problems.length > 0) {
 
 const log = (message) => console.error(`[open2code ${new Date().toISOString()}] ${message}`)
 const runtime = createRuntime({ config, log })
-const supervisor = createSupervisor({ config, runtime, log })
+const supervisor = createSupervisor({ config, runtime, log, syncIntervalMs: config.syncIntervalMs })
 
 await supervisor.start()
 

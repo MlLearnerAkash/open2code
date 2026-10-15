@@ -12,6 +12,7 @@ import path from "node:path"
 
 const defaultListenPort = 4000
 const defaultIntervalMs = 2_000
+const defaultSyncIntervalMs = 15_000
 const defaultLocalPort = 4096
 const defaultCloudPort = 4096
 const defaultTunnelPort = 4097
@@ -46,6 +47,7 @@ export function loadConfig({ env = process.env, home = homedir(), readFile = rea
     prefer: env.OPEN2CODE_PREFER ?? raw.prefer ?? "local",
     failback: bool(env.OPEN2CODE_FAILBACK, raw.failback, true),
     intervalMs: number(env.OPEN2CODE_INTERVAL_MS, raw.intervalMs, defaultIntervalMs),
+    syncIntervalMs: number(env.OPEN2CODE_SYNC_INTERVAL_MS, raw.syncIntervalMs, defaultSyncIntervalMs),
     local: {
       mode: local.mode ?? "service",
       url: env.OPEN2CODE_LOCAL_URL ?? local.url ?? null,
