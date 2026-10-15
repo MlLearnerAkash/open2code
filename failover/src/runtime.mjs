@@ -110,13 +110,12 @@ export function createRuntime({ config, log = () => {}, env = process.env }) {
       }
       const db = remotePath(config.cloud.db)
       const password = resolveCloudPassword()
-      const command = [
-        `mkdir -p "$(dirname ${db})"`,
-        `OPENCODE_PASSWORD=${shq(password)} OPENCODE_DB=${db} nohup opencode serve`,
-        `--hostname ${config.cloud.remoteHost} --port ${config.cloud.remotePort}`,
-        `> "$HOME/.open2code-failover.log" 2>&1 < /dev/null &`,
-        `echo $! > "$HOME/.open2code-failover.pid"`,
-      ].join(" ")
+      const command =
+        `BIN=$HOME/.opencode/bin/opencode; [ -x "$BIN" ] || BIN="$(command -v opencode)"; ` +
+        `mkdir -p "$(dirname ${db})"; ` +
+        `OPENCODE_PASSWORD=${shq(password)} OPENCODE_DB=${db} ` +
+        `nohup "$BIN" serve --hostname ${config.cloud.remoteHost} --port ${config.cloud.remotePort} ` +
+        `> "$HOME/.open2code-failover.log" 2>&1 < /dev/null & echo $! > "$HOME/.open2code-failover.pid"`
       await remoteRun(config.cloud, command, { log })
     },
 
@@ -178,9 +177,14 @@ export function createRuntime({ config, log = () => {}, env = process.env }) {
 
   async function readCloud() {
     const db = remotePath(config.cloud.db)
+    const python =
+      `python3 -c 'import sqlite3,sys; s=sqlite3.connect(sys.argv[1]); ` +
+      `d=sqlite3.connect(sys.argv[2]); s.backup(d); d.close(); s.close()' ${db} ${remoteSnapshotFile}`
     const result = await remoteRun(
       config.cloud,
-      `sqlite3 ${db} ".backup '${remoteSnapshotFile}'" && cat ${remoteSnapshotFile} && rm -f ${remoteSnapshotFile}`,
+      `[ -f ${db} ] || { echo "no database at ${db}" >&2; exit 3; }; ` +
+        `if python3 -c 'import sqlite3' 2>/dev/null; then ${python}; else sqlite3 ${db} ".backup '${remoteSnapshotFile}'"; fi ` +
+        `&& cat ${remoteSnapshotFile} && rm -f ${remoteSnapshotFile}`,
       { log },
     )
     if (result.code !== 0) throw new Error(result.stderr.trim() || `ssh exited ${result.code}`)

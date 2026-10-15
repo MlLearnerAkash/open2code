@@ -18,9 +18,18 @@ export async function snapshotSqlite(dbPath) {
   if (!existsSync(dbPath)) throw new Error(`database not found: ${dbPath}`)
   const dir = mkdtempSync(path.join(os.tmpdir(), "open2code-snap-"))
   const file = path.join(dir, "opencode.db")
-  await run("sqlite3", [dbPath, `.backup '${file}'`])
+  try {
+    await run("sqlite3", [dbPath, `.backup '${file}'`])
+  } catch (error) {
+    // Fall back to Python's sqlite3 module when the sqlite3 CLI is unavailable.
+    if (error.code !== "ENOENT") throw error
+    await run("python3", [backupProgram, dbPath, file])
+  }
   return { file, cleanup: () => rmSync(dir, { recursive: true, force: true }) }
 }
+
+export const backupProgram =
+  "import sqlite3,sys; s=sqlite3.connect(sys.argv[1]); d=sqlite3.connect(sys.argv[2]); s.backup(d); d.close(); s.close()"
 
 export function replaceLocalDb(dbPath, sourceFile) {
   mkdirSync(path.dirname(dbPath), { recursive: true })
