@@ -82,6 +82,9 @@ export function remoteRun(config, command, { input, log = () => {} } = {}) {
       resolve({ code, stdout: Buffer.concat(out), stderr: Buffer.concat(err).toString("utf8") }),
     )
     if (input) {
+      // The remote side can exit (bad host, refused, killed) before stdin is
+      // fully flushed; swallow the resulting EPIPE instead of crashing.
+      child.stdin.on("error", () => {})
       child.stdin.end(input)
     }
   })

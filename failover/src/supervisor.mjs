@@ -115,7 +115,11 @@ export function createSupervisor({
     status,
     server,
     async start() {
-      await bootstrap()
+      try {
+        await bootstrap()
+      } catch (error) {
+        log(`bootstrap failed: ${error.message}; starting in degraded mode`)
+      }
       timer = setInterval(() => void tick(), config.intervalMs)
       await new Promise((resolve) => server.listen(config.listen.port, config.listen.host, resolve))
       log(`supervisor listening on http://${config.listen.host}:${config.listen.port}, active=${active}`)
