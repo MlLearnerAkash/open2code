@@ -5,6 +5,7 @@ import { execFile, spawn } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { randomBytes } from "node:crypto"
+import { gunzipSync, gzipSync } from "node:zlib"
 import { promisify } from "node:util"
 import path from "node:path"
 import { probe } from "./health.mjs"
@@ -184,22 +185,23 @@ export function createRuntime({ config, log = () => {}, env = process.env }) {
       config.cloud,
       `[ -f ${db} ] || { echo "no database at ${db}" >&2; exit 3; }; ` +
         `if python3 -c 'import sqlite3' 2>/dev/null; then ${python}; else sqlite3 ${db} ".backup '${remoteSnapshotFile}'"; fi ` +
-        `&& cat ${remoteSnapshotFile} && rm -f ${remoteSnapshotFile}`,
+        `&& gzip -c ${remoteSnapshotFile} && rm -f ${remoteSnapshotFile}`,
       { log },
     )
     if (result.code !== 0) throw new Error(result.stderr.trim() || `ssh exited ${result.code}`)
     if (result.stdout.length === 0) throw new Error("cloud returned an empty snapshot")
-    return result.stdout
+    return gunzipSync(result.stdout)
   }
 
   async function writeCloud(file) {
     const db = remotePath(config.cloud.db)
-    // Write to a temp file and rename so a reader (or an interrupted transfer)
-    // never sees a half-written database.
+    // Compress the snapshot (SQLite compresses well) and swap it in through a
+    // temp file, so the transfer is smaller and a reader never sees a partial
+    // database.
     const result = await remoteRun(
       config.cloud,
-      `mkdir -p "$(dirname ${db})"; rm -f ${db}.tmp ${db}-wal ${db}-shm; cat > ${db}.tmp && mv -f ${db}.tmp ${db}`,
-      { input: readFileSync(file), log },
+      `mkdir -p "$(dirname ${db})"; rm -f ${db}.tmp ${db}-wal ${db}-shm; gzip -dc > ${db}.tmp && mv -f ${db}.tmp ${db}`,
+      { input: gzipSync(readFileSync(file)), log },
     )
     if (result.code !== 0) throw new Error(result.stderr.trim() || `ssh exited ${result.code}`)
   }

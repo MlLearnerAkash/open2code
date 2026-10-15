@@ -26,10 +26,10 @@ when the local one goes down, then back when it recovers.
   recovers it fails back.
 - **Continuous session sync.** The active server's SQLite database is
   periodically snapshotted (`sqlite3 .backup`, safe while the server writes) and
-  copied onto the stopped standby through a temp file and an atomic rename, so a
-  session that starts on one side exists on the other when traffic switches.
-  Syncs are serialized: a copy that takes longer than `syncIntervalMs` finishes
-  before the next one starts.
+  gzip-compressed onto the stopped standby through a temp file and an atomic
+  rename, so a session that starts on one side exists on the other when traffic
+  switches. Syncs are serialized: a copy that takes longer than
+  `syncIntervalMs` finishes before the next one starts.
 
 ### Why a warm standby and not two live writers
 

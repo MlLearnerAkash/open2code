@@ -123,14 +123,20 @@ export function createSupervisor({
     status,
     server,
     async start() {
+      // Resolve routing targets and bring up the tunnel, then accept
+      // connections. The initial database sync can take far longer than a
+      // caller's startup timeout, so it must not gate readiness: callers see a
+      // listening proxy right away and the sync continues in the background.
+      await refreshIdentity()
+      await runtime.ensureTunnel()
+      await new Promise((resolve) => server.listen(config.listen.port, config.listen.host, resolve))
+      log(`supervisor listening on http://${config.listen.host}:${config.listen.port}, active=${active}`)
       try {
         await bootstrap()
       } catch (error) {
         log(`bootstrap failed: ${error.message}; starting in degraded mode`)
       }
       timer = setInterval(() => void tick(), config.intervalMs)
-      await new Promise((resolve) => server.listen(config.listen.port, config.listen.host, resolve))
-      log(`supervisor listening on http://${config.listen.host}:${config.listen.port}, active=${active}`)
       return server
     },
     async stop() {
