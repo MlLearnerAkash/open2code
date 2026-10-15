@@ -1,0 +1,21 @@
+{
+  "$schema": "./config.schema.json",
+  "prefer": "local",
+  "failback": true,
+  "intervalMs": 2000,
+  "listen": {
+    "host": "127.0.0.1",
+    "port": 4000
+  },
+  "local": {
+    "mode": "service",
+    "port": 4096
+  },
+  "cloud": {
+    "ssh": "cloud",
+    "remoteHost": "127.0.0.1",
+    "remotePort": 4096,
+    "tunnelPort": 4097,
+    "db": "~/.local/share/opencode/opencode.db"
+  }
+}

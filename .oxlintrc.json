@@ -163,6 +163,7 @@
     ".pi/**",
     ".roo/**",
     ".windsurf/**",
-    "script/oxlint/anti-slop/**"
+    "script/oxlint/anti-slop/**",
+    "failover/**"
   ]
 }

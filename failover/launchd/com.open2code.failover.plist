@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent that keeps the open2code failover supervisor running so the stable
+  proxy port is always available. Replace the two paths below with absolute
+  paths on your machine (launchd does not expand ~), then:
+
+    cp com.open2code.failover.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.open2code.failover.plist
+
+  The supervisor reads ~/.config/open2code/failover.json by default.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.open2code.failover</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/node</string>
+    <string>/ABSOLUTE/PATH/TO/open2code/failover/bin/supervisor.mjs</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/open2code-failover.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/open2code-failover.err.log</string>
+</dict>
+</plist>

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "open2code failover config",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "prefer": { "enum": ["local", "cloud"], "default": "local" },
+    "failback": { "type": "boolean", "default": true },
+    "intervalMs": { "type": "integer", "minimum": 250, "default": 2000 },
+    "listen": {
+      "type": "object",
+      "properties": {
+        "host": { "type": "string", "default": "127.0.0.1" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 4000 }
+      }
+    },
+    "local": {
+      "type": "object",
+      "properties": {
+        "mode": { "enum": ["service", "serve"], "default": "service" },
+        "url": { "type": ["string", "null"] },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 4096 },
+        "password": { "type": ["string", "null"] },
+        "db": { "type": ["string", "null"] },
+        "start": { "type": ["string", "null"] },
+        "stop": { "type": ["string", "null"] }
+      }
+    },
+    "cloud": {
+      "type": "object",
+      "properties": {
+        "mode": { "enum": ["serve"], "default": "serve" },
+        "ssh": { "type": ["string", "null"] },
+        "sshPort": { "type": ["integer", "null"] },
+        "sshArgs": { "type": "array", "items": { "type": "string" } },
+        "remoteHost": { "type": "string", "default": "127.0.0.1" },
+        "remotePort": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 4096 },
+        "tunnelPort": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 4097 },
+        "password": { "type": ["string", "null"] },
+        "db": { "type": "string", "default": "~/.local/share/opencode/opencode.db" },
+        "start": { "type": ["string", "null"] },
+        "stop": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

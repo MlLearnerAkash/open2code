@@ -1,0 +1,26 @@
+# systemd user unit for the cloud OpenCode server used by open2code failover.
+#
+# Install on the cloud host:
+#   mkdir -p ~/.config/systemd/user
+#   cp opencode.service ~/.config/systemd/user/opencode.service
+#   # set OPENCODE_PASSWORD to the same value as cloud.password in the failover config
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now opencode
+#   loginctl enable-linger "$USER"   # keep it running without an active login
+#
+# Then point the failover config at it:
+#   "cloud": { "start": "systemctl --user start opencode", "stop": "systemctl --user stop opencode" }
+
+[Unit]
+Description=OpenCode server (open2code cloud standby)
+After=network.target
+
+[Service]
+Environment=OPENCODE_PASSWORD=change-me
+Environment=OPENCODE_DB=%h/.local/share/opencode/opencode.db
+ExecStart=%h/.opencode/bin/opencode serve --hostname 127.0.0.1 --port 4096
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

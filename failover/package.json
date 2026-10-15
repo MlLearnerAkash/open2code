@@ -1,0 +1,16 @@
+{
+  "name": "@open2code/failover",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Local-first OpenCode with automatic failover to a cloud server over SSH.",
+  "type": "module",
+  "bin": {
+    "open2code": "./bin/open2code.mjs"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
