@@ -9,7 +9,7 @@
 // Usage: open2code [opencode args...]
 
 import { spawn } from "node:child_process"
-import { createWriteStream, mkdirSync } from "node:fs"
+import { closeSync, mkdirSync, openSync } from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
 import { loadConfig, validate } from "../src/config.mjs"
@@ -34,15 +34,16 @@ async function ensureSupervisor() {
 
   const stateDir = path.join(homedir(), ".local", "state", "open2code")
   mkdirSync(stateDir, { recursive: true })
-  const logStream = createWriteStream(path.join(stateDir, "supervisor.log"), { flags: "a" })
+  const logFd = openSync(path.join(stateDir, "supervisor.log"), "a")
 
   const supervisor = new URL("./supervisor.mjs", import.meta.url)
   const child = spawn(process.execPath, [supervisor.pathname], {
     detached: true,
-    stdio: ["ignore", logStream, logStream],
+    stdio: ["ignore", logFd, logFd],
     env: process.env,
   })
   child.unref()
+  closeSync(logFd)
 
   const deadline = Date.now() + 30_000
   while (Date.now() < deadline) {
