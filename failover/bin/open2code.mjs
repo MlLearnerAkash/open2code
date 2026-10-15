@@ -6,7 +6,10 @@
 // reconnect logic re-attaches to the supervisor after any disruption, and the
 // supervisor routes to whichever server is healthy.
 //
-// Usage: open2code [opencode args...]
+// Usage: open2code [--ssh <host>] [opencode args...]
+//
+// --ssh <host> overrides cloud.ssh for this launch (an SSH host alias or
+// user@host); the environment override is inherited by the supervisor.
 
 import { spawn } from "node:child_process"
 import { closeSync, mkdirSync, openSync } from "node:fs"
@@ -14,6 +17,9 @@ import { homedir } from "node:os"
 import path from "node:path"
 import { loadConfig, validate } from "../src/config.mjs"
 import { STATUS_PATH } from "../src/proxy.mjs"
+
+const { args, ssh } = parseArgs(process.argv.slice(2))
+if (ssh) process.env.OPEN2CODE_CLOUD_SSH = ssh
 
 const config = loadConfig()
 const problems = validate(config)
@@ -26,8 +32,27 @@ if (problems.length > 0) {
 const endpoint = `http://${config.listen.host}:${config.listen.port}`
 
 await ensureSupervisor()
-const code = await runTui(process.argv.slice(2))
+const code = await runTui(args)
 process.exit(code ?? 0)
+
+function parseArgs(argv) {
+  const args = []
+  let ssh
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]
+    if (arg === "--ssh") {
+      ssh = argv[index + 1]
+      index += 1
+      continue
+    }
+    if (arg.startsWith("--ssh=")) {
+      ssh = arg.slice("--ssh=".length)
+      continue
+    }
+    args.push(arg)
+  }
+  return { args, ssh }
+}
 
 async function ensureSupervisor() {
   if (await healthy()) return

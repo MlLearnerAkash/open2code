@@ -104,7 +104,13 @@ Minimal config:
 
 ```sh
 ./failover/bin/open2code.mjs            # or install it on your PATH as `open2code`
+./failover/bin/open2code.mjs --ssh my-other-host   # override cloud.ssh for this launch
 ```
+
+`--ssh <host>` (or `--ssh=<host>`) routes this launch through a different SSH
+host than `cloud.ssh`. It only takes effect when the wrapper has to start the
+supervisor; to switch hosts on an already-running supervisor, stop it first
+(`pkill -f failover/bin/supervisor.mjs`) and relaunch.
 
 The wrapper starts the supervisor detached (logs in
 `~/.local/state/open2code/supervisor.log`), waits for it to become ready, then
