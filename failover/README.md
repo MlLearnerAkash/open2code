@@ -58,6 +58,26 @@ Install `opencode` on the cloud and make sure `ssh cloud true` works without a
 password. The supervisor can start the cloud server itself, or use a service
 manager — see [Running the cloud server as a service](#running-the-cloud-server-as-a-service).
 
+Point `cloud.ssh` at an SSH host alias. For example, in `~/.ssh/config`:
+
+```
+Host portulica
+  HostName 24.176.198.155
+  User opervu
+  ForwardX11 yes
+  ForwardX11Trusted yes
+```
+
+Then `cloud.ssh` is `portulica`. Verify non-interactive access (no password
+prompt) with `ssh -o BatchMode=yes portulica true`.
+
+The cloud needs `opencode` v2 to match the client. The default installer ships
+v1, so use the v2 installer:
+
+```sh
+curl -fsSL https://opencode.ai/v2/install | bash
+```
+
 ### 2. Local config
 
 ```sh
