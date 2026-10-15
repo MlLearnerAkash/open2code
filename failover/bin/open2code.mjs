@@ -34,9 +34,32 @@ const endpoint = `http://${config.listen.host}:${config.listen.port}`
 // Expose the effective host to the TUI (and any installed plugin) for display.
 if (config.cloud.ssh) process.env.OPEN2CODE_SSH = config.cloud.ssh
 
+// Brand the terminal title. The TUI otherwise sets a hardcoded "OpenCode"
+// title, so disable its title handling and set ours instead (and restore it
+// when the TUI clears the title on exit).
+const title = "open2code"
+process.env.OPENCODE_CONFIG_CONTENT = withTitleDisabled(process.env.OPENCODE_CONFIG_CONTENT)
+writeTitle(title)
+
 await ensureSupervisor()
 const code = await runTui(args)
+writeTitle(title)
 process.exit(code ?? 0)
+
+function withTitleDisabled(existing) {
+  let base = {}
+  try {
+    base = existing ? JSON.parse(existing) : {}
+  } catch {
+    base = {}
+  }
+  const terminal = typeof base.terminal === "object" && base.terminal ? base.terminal : {}
+  return JSON.stringify({ ...base, terminal: { ...terminal, title: false } })
+}
+
+function writeTitle(value) {
+  process.stdout.write(`\u001b]0;${value}\u0007`)
+}
 
 function parseArgs(argv) {
   const args = []

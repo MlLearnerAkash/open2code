@@ -112,6 +112,10 @@ host than `cloud.ssh`. It only takes effect when the wrapper has to start the
 supervisor; to switch hosts on an already-running supervisor, stop it first
 (`pkill -f failover/bin/supervisor.mjs`) and relaunch.
 
+The wrapper also brands the terminal title as `open2code` (the TUI sets a
+hardcoded `OpenCode` title, so the wrapper disables it via
+`OPENCODE_CONFIG_CONTENT` and sets its own).
+
 The wrapper starts the supervisor detached (logs in
 `~/.local/state/open2code/supervisor.log`), waits for it to become ready, then
 launches `opencode --server http://127.0.0.1:4000`. Any extra arguments are
