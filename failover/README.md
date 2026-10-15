@@ -123,6 +123,21 @@ Check status at any time:
 curl -s http://127.0.0.1:4000/__open2code/status | jq
 ```
 
+## Show the cloud host in the TUI
+
+`failover/plugin/open2code-ssh` is a TUI plugin that prints `ssh <host>` in the
+prompt footer, bottom-right. It reads `OPEN2CODE_SSH`, which `open2code` sets to
+the effective `cloud.ssh`, so it stays hidden for a normal `opencode` launch.
+
+Install it by linking the plugin into your OpenCode config:
+
+```sh
+mkdir -p ~/.config/opencode/plugins
+ln -sfn "$(pwd)/failover/plugin/open2code-ssh" ~/.config/opencode/plugins/open2code-ssh
+```
+
+Launch through `open2code` to see it.
+
 ## Configuration reference
 
 | Field | Default | Meaning |

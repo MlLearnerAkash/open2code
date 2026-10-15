@@ -31,6 +31,9 @@ if (problems.length > 0) {
 
 const endpoint = `http://${config.listen.host}:${config.listen.port}`
 
+// Expose the effective host to the TUI (and any installed plugin) for display.
+if (config.cloud.ssh) process.env.OPEN2CODE_SSH = config.cloud.ssh
+
 await ensureSupervisor()
 const code = await runTui(args)
 process.exit(code ?? 0)
