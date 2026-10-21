@@ -85,7 +85,11 @@ opencode service stop         # stop the background server
    ```bash
    ssh -o BatchMode=yes portulica true   # must exit silently, no password prompt
    ```
-2. **Cloud** — install opencode v2 (the default installer ships v1): `curl -fsSL https://opencode.ai/v2/install | bash`
+2. **Cloud** — run the cloud installer on the server. It installs opencode v2, configures the server on `127.0.0.1:4096` with a generated password, runs it as a systemd user service, and sets up SSH key access:
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/MlLearnerAkash/open2code/server-failover/failover/cloud/install | bash -s -- --ssh-user opervu
+   ```
+   It prints the `~/.ssh/config` block and the `failover.json` to copy to your laptop.
 3. **Local config** — create `~/.config/open2code/failover.json`:
    ```jsonc
    {

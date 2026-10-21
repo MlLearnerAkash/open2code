@@ -54,6 +54,23 @@ not a safe thing to build on SQLite.
 
 ### 1. Cloud server
 
+The cloud installer does the whole server side in one command: it installs
+`opencode` from GitHub, points the server at `127.0.0.1:4096` with a generated
+password, runs it as a systemd user service, and makes sure the SSH server
+accepts the laptop's key.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/MlLearnerAkash/open2code/server-failover/failover/cloud/install | bash -s -- --ssh-user opervu
+```
+
+It prints the server password, the `~/.ssh/config` block, and the
+`failover.json` to copy to your laptop. Pass
+`--pubkey "$(cat ~/.ssh/id_ed25519.pub)"` to authorize a key the laptop already
+has instead of generating one on the server.
+
+<details>
+<summary>Manual setup</summary>
+
 Install `opencode` on the cloud and make sure `ssh cloud true` works without a
 password. The supervisor can start the cloud server itself, or use a service
 manager — see [Running the cloud server as a service](#running-the-cloud-server-as-a-service).
@@ -77,6 +94,8 @@ v1, so use the v2 installer:
 ```sh
 curl -fsSL https://opencode.ai/v2/install | bash
 ```
+
+</details>
 
 ### 2. Local config
 
@@ -180,6 +199,9 @@ launcher, and point the config at it:
   }
 }
 ```
+
+The cloud installer writes this unit for you, with the generated password
+already in it, and enables it with `systemctl --user enable --now opencode`.
 
 ## Running the supervisor at login (macOS)
 

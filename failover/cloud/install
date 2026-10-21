@@ -1,0 +1,427 @@
+#!/usr/bin/env bash
+# Sets up a cloud box as the open2code failover standby.
+#
+# Run it on the server:
+#   curl -fsSL https://raw.githubusercontent.com/MlLearnerAkash/open2code/server-failover/failover/cloud/install | bash -s -- --ssh-user opervu
+#
+# It installs opencode, configures the server on loopback with a known password,
+# runs it as a systemd user service, and makes sure the SSH server accepts the
+# laptop's key. It prints everything the laptop needs to finish the setup.
+set -euo pipefail
+
+SOURCE_BASE=${OPEN2CODE_SOURCE_BASE:-https://raw.githubusercontent.com/MlLearnerAkash/open2code/server-failover}
+
+MUTED='\033[0;2m'
+RED='\033[0;31m'
+ORANGE='\033[38;5;214m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+usage() {
+    cat <<EOF
+open2code cloud installer
+
+Usage: install [options]
+
+Options:
+    -h, --help               Display this help message
+        --ssh-user <user>     User the laptop logs in as (default: the current user)
+        --ssh-host <host>     Address the laptop connects to (default: detected public IP)
+        --ssh-alias <alias>   Host alias for the laptop's ~/.ssh/config (default: open2code-cloud)
+        --ssh-port <port>     SSH port (default: 22)
+        --pubkey <key>        Laptop public key to authorize (default: generate a keypair here)
+        --server-port <port>  OpenCode server port, bound to 127.0.0.1 (default: 4096)
+        --password <secret>   Server password (default: generated)
+        --no-systemd          Do not install the systemd user service
+        --no-ssh              Do not touch the SSH server
+        --installer-url <url> URL of the opencode installer script
+
+Example:
+    curl -fsSL $SOURCE_BASE/failover/cloud/install | bash -s -- --ssh-user opervu
+EOF
+}
+
+step() {
+    echo -e "\n${ORANGE}==>${NC} ${MUTED}$1${NC}"
+}
+
+info() {
+    echo -e "  $1"
+}
+
+warn() {
+    echo -e "${ORANGE}Warning:${NC} $1" >&2
+}
+
+fail() {
+    echo -e "${RED}Error:${NC} $1" >&2
+    exit 1
+}
+
+ssh_user=$(id -un)
+ssh_host=""
+ssh_alias=open2code-cloud
+ssh_port=22
+pubkey=""
+server_port=4096
+password=""
+use_systemd=true
+use_ssh=true
+installer_url="$SOURCE_BASE/install"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --ssh-user)
+            [[ -n "${2:-}" ]] || fail "--ssh-user requires a value"
+            ssh_user="$2"
+            shift 2
+            ;;
+        --ssh-host)
+            [[ -n "${2:-}" ]] || fail "--ssh-host requires a value"
+            ssh_host="$2"
+            shift 2
+            ;;
+        --ssh-alias)
+            [[ -n "${2:-}" ]] || fail "--ssh-alias requires a value"
+            ssh_alias="$2"
+            shift 2
+            ;;
+        --ssh-port)
+            [[ -n "${2:-}" ]] || fail "--ssh-port requires a value"
+            ssh_port="$2"
+            shift 2
+            ;;
+        --pubkey)
+            [[ -n "${2:-}" ]] || fail "--pubkey requires a value"
+            pubkey="$2"
+            shift 2
+            ;;
+        --server-port)
+            [[ -n "${2:-}" ]] || fail "--server-port requires a value"
+            server_port="$2"
+            shift 2
+            ;;
+        --password)
+            [[ -n "${2:-}" ]] || fail "--password requires a value"
+            password="$2"
+            shift 2
+            ;;
+        --no-systemd)
+            use_systemd=false
+            shift
+            ;;
+        --no-ssh)
+            use_ssh=false
+            shift
+            ;;
+        --installer-url)
+            [[ -n "${2:-}" ]] || fail "--installer-url requires a value"
+            installer_url="$2"
+            shift 2
+            ;;
+        *)
+            warn "Unknown option '$1'"
+            shift
+            ;;
+    esac
+done
+
+command -v curl >/dev/null 2>&1 || fail "curl is required"
+[[ "$(uname -s)" == "Linux" ]] || fail "this installer targets Linux; the cloud standby needs a systemd user service"
+command -v systemctl >/dev/null 2>&1 || fail "systemd is required"
+
+if [ -z "$password" ]; then
+    if command -v openssl >/dev/null 2>&1; then
+        password=$(openssl rand -base64 32 </dev/null | tr -dc 'A-Za-z0-9' | cut -c1-48)
+    else
+        password=$(head -c 64 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | cut -c1-48)
+    fi
+fi
+
+OPENCODE_BIN="$HOME/.opencode/bin/opencode"
+
+# The script itself arrives on stdin when it is piped from curl, so every command
+# that could read stdin gets an empty one.
+as_root() {
+    if [ "$(id -u)" -eq 0 ]; then
+        "$@" </dev/null
+    elif command -v sudo >/dev/null 2>&1; then
+        if [ -t 0 ]; then
+            sudo "$@" </dev/null
+        else
+            sudo -n "$@" </dev/null
+        fi
+    else
+        return 1
+    fi
+}
+
+can_root() {
+    if [ "$(id -u)" -eq 0 ]; then
+        return 0
+    fi
+    command -v sudo >/dev/null 2>&1 || return 1
+    as_root true >/dev/null 2>&1
+}
+
+# The public address the laptop dials, when it can be detected.
+detect_host() {
+    local detected
+    detected=$(curl -fsS --max-time 5 https://api.ipify.org </dev/null 2>/dev/null || true)
+    if [ -z "$detected" ]; then
+        detected=$(ip route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") {print $(i + 1); exit}}' || true)
+    fi
+    printf '%s' "${detected:-YOUR_SERVER_IP}"
+}
+
+install_opencode() {
+    step "Installing opencode"
+    if [ -x "$OPENCODE_BIN" ]; then
+        info "already installed: $("$OPENCODE_BIN" --version)"
+        return 0
+    fi
+    info "installer: $installer_url"
+    curl -fsSL "$installer_url" | bash
+    [ -x "$OPENCODE_BIN" ] || fail "opencode was not installed at $OPENCODE_BIN"
+    info "installed: $("$OPENCODE_BIN" --version)"
+}
+
+configure_server() {
+    step "Configuring the server"
+    export PATH="$HOME/.opencode/bin:$PATH"
+    "$OPENCODE_BIN" service set hostname 127.0.0.1
+    "$OPENCODE_BIN" service set port "$server_port"
+    "$OPENCODE_BIN" service set password "$password"
+    # The standby runs under systemd, so the managed service stays off and never
+    # competes for the port.
+    "$OPENCODE_BIN" service set disabled true
+    info "server: 127.0.0.1:$server_port (password stored in ~/.config/opencode/service.json)"
+}
+
+# systemd reads % as a specifier, so a literal percent has to be doubled.
+systemd_escape() {
+    printf '%s' "$1" | sed 's/%/%%/g'
+}
+
+install_systemd_unit() {
+    step "Installing the systemd user service"
+    local unit="$HOME/.config/systemd/user/opencode.service"
+    mkdir -p "$(dirname "$unit")"
+    cat >"$unit" <<EOF
+# systemd user unit for the cloud OpenCode server used by open2code failover.
+#
+# Written by failover/cloud/install. The password matches the one in
+# ~/.config/opencode/service.json and the cloud.password in the failover config.
+
+[Unit]
+Description=OpenCode server (open2code cloud standby)
+After=network.target
+
+[Service]
+Environment="OPENCODE_PASSWORD=$(systemd_escape "$password")"
+Environment=OPENCODE_DB=%h/.local/share/opencode/opencode.db
+ExecStart=%h/.opencode/bin/opencode serve --hostname 127.0.0.1 --port $server_port
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+EOF
+    systemctl --user daemon-reload </dev/null
+    systemctl --user enable --now opencode </dev/null
+    # Keep the standby running without an active login session.
+    as_root loginctl enable-linger "$(id -un)" >/dev/null 2>&1 ||
+        warn "could not enable linger; the standby stops when you log out"
+    info "unit: $unit"
+}
+
+ssh_service_name() {
+    if systemctl list-unit-files 2>/dev/null | grep -qE '^ssh\.service'; then
+        echo ssh
+    else
+        echo sshd
+    fi
+}
+
+install_openssh() {
+    if command -v sshd >/dev/null 2>&1 || [ -x /usr/sbin/sshd ]; then
+        return 0
+    fi
+    if command -v apt-get >/dev/null 2>&1; then
+        as_root env DEBIAN_FRONTEND=noninteractive apt-get update -qq || return 1
+        as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server || return 1
+    elif command -v dnf >/dev/null 2>&1; then
+        as_root dnf install -y openssh-server || return 1
+    elif command -v yum >/dev/null 2>&1; then
+        as_root yum install -y openssh-server || return 1
+    elif command -v apk >/dev/null 2>&1; then
+        as_root apk add --no-cache openssh || return 1
+    elif command -v zypper >/dev/null 2>&1; then
+        as_root zypper install -y openssh || return 1
+    else
+        return 1
+    fi
+}
+
+setup_sshd() {
+    step "Setting up the SSH server"
+
+    if ! install_openssh; then
+        warn "openssh-server is not installed; assuming the SSH server is already there"
+    fi
+
+    local service
+    service=$(ssh_service_name)
+
+    if as_root systemctl enable --now "$service" >/dev/null 2>&1; then
+        info "sshd: $service is running"
+    else
+        warn "could not manage the $service service (needs root); assuming it is already running"
+    fi
+
+    # Key-based login for the laptop. Password login is left untouched so a
+    # mistake here cannot lock anyone out.
+    if ! can_root; then
+        warn "root access is required to edit the SSH configuration; the key is still authorized for this user"
+        return 0
+    fi
+
+    local dropin=/etc/ssh/sshd_config.d/99-open2code.conf
+    if as_root test -d /etc/ssh/sshd_config.d; then
+        as_root tee "$dropin" >/dev/null <<'EOF'
+# open2code failover: the laptop reaches the standby over SSH with a key.
+PubkeyAuthentication yes
+EOF
+    else
+        as_root sh -c "grep -q 'open2code-failover' /etc/ssh/sshd_config || printf '\n# open2code-failover\nPubkeyAuthentication yes\n' >> /etc/ssh/sshd_config"
+    fi
+
+    if as_root sshd -t; then
+        as_root systemctl reload "$service" >/dev/null 2>&1 ||
+            as_root systemctl restart "$service" >/dev/null 2>&1 ||
+            true
+        info "PubkeyAuthentication is enabled"
+    else
+        as_root rm -f "$dropin"
+        warn "the SSH configuration did not validate; the change was reverted"
+    fi
+}
+
+setup_authorized_keys() {
+    step "Authorizing the laptop"
+    mkdir -p "$HOME/.ssh"
+    chmod 700 "$HOME/.ssh"
+    touch "$HOME/.ssh/authorized_keys"
+    chmod 600 "$HOME/.ssh/authorized_keys"
+
+    if [ -z "$pubkey" ]; then
+        local key="$HOME/.ssh/open2code_client"
+        if [ ! -f "$key" ]; then
+            command -v ssh-keygen >/dev/null 2>&1 || fail "ssh-keygen is required"
+            ssh-keygen -t ed25519 -N "" -C "open2code-cloud" -f "$key" </dev/null >/dev/null
+            info "generated a keypair at $key"
+        fi
+        pubkey=$(cat "$key.pub")
+    fi
+
+    if ! grep -qF "$pubkey" "$HOME/.ssh/authorized_keys"; then
+        printf '%s\n' "$pubkey" >>"$HOME/.ssh/authorized_keys"
+        info "added the public key to ~/.ssh/authorized_keys"
+    else
+        info "the public key is already authorized"
+    fi
+}
+
+open_firewall() {
+    local service
+    service=$(ssh_service_name)
+    if command -v ufw >/dev/null 2>&1; then
+        as_root ufw allow "$ssh_port"/tcp >/dev/null 2>&1 || true
+    elif command -v firewall-cmd >/dev/null 2>&1; then
+        as_root firewall-cmd --permanent --add-service="$service" >/dev/null 2>&1 || true
+        as_root firewall-cmd --reload >/dev/null 2>&1 || true
+    fi
+}
+
+verify_server() {
+    step "Verifying"
+    local code=000 attempt=0
+    while [ "$attempt" -lt 20 ]; do
+        code=$(curl -s -o /dev/null -w "%{http_code}" -u "opencode:$password" \
+            "http://127.0.0.1:$server_port/api/info" </dev/null 2>/dev/null || echo 000)
+        [ "$code" = "200" ] && break
+        attempt=$((attempt + 1))
+        sleep 0.5
+    done
+    if [ "$code" = "200" ]; then
+        echo -e "  ${GREEN}server responds on 127.0.0.1:$server_port${NC}"
+    else
+        warn "the server did not answer on 127.0.0.1:$server_port (HTTP $code)"
+    fi
+    if systemctl --user is-active --quiet opencode </dev/null; then
+        echo -e "  ${GREEN}systemd unit is active${NC}"
+    else
+        warn "the systemd unit is not active; check: systemctl --user status opencode"
+    fi
+}
+
+print_summary() {
+    local host
+    host="${ssh_host:-$(detect_host)}"
+
+    cat <<EOF
+
+${ORANGE}Cloud standby ready.${NC} Finish the setup on your laptop:
+
+${MUTED}1. Copy the private key (run this on your laptop)${NC}
+   scp $(id -un)@$host:$HOME/.ssh/open2code_client ~/.ssh/open2code_client
+   chmod 600 ~/.ssh/open2code_client
+
+${MUTED}2. Add the host to ~/.ssh/config${NC}
+   Host $ssh_alias
+     HostName $host
+     User $ssh_user
+     Port $ssh_port
+     IdentityFile ~/.ssh/open2code_client
+     IdentitiesOnly yes
+
+${MUTED}3. Create ~/.config/open2code/failover.json${NC}
+   {
+     "prefer": "local",
+     "failback": true,
+     "listen": { "host": "127.0.0.1", "port": 4000 },
+     "local": { "mode": "service", "port": 4096 },
+     "cloud": {
+       "ssh": "$ssh_alias",
+       "password": "$password",
+       "remoteHost": "127.0.0.1",
+       "remotePort": $server_port,
+       "tunnelPort": 4097,
+       "start": "systemctl --user start opencode",
+       "stop": "systemctl --user stop opencode"
+     }
+   }
+
+${MUTED}4. Check the link${NC}
+   ssh -o BatchMode=yes $ssh_alias true
+   curl -s http://127.0.0.1:4000/__open2code/status | jq
+
+EOF
+}
+
+install_opencode
+configure_server
+if [ "$use_systemd" = "true" ]; then
+    install_systemd_unit
+fi
+if [ "$use_ssh" = "true" ]; then
+    setup_sshd
+    setup_authorized_keys
+    open_firewall
+fi
+verify_server
+print_summary

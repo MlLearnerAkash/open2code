@@ -1,5 +1,8 @@
 # systemd user unit for the cloud OpenCode server used by open2code failover.
 #
+# The cloud installer (failover/cloud/install) writes this unit with the
+# generated password already in it. To install it by hand:
+#
 # Install on the cloud host:
 #   mkdir -p ~/.config/systemd/user
 #   cp opencode.service ~/.config/systemd/user/opencode.service
