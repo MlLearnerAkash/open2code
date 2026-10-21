@@ -18,11 +18,14 @@ Options:
     -h, --help              Display this help message
     -v, --version <version> Install a specific version (e.g., 0.0.0-beta-17236)
     -b, --binary <path>     Install from a local binary instead of downloading
+        --server            Set up and start the local background server after installing
+        --server-port <port> Port for the local background server (default: 4096)
         --no-modify-path    Don't modify shell config files (.zshrc, .bashrc, etc.)
 
 Examples:
     curl -fsSL https://opencode.ai/v2/install | bash
     curl -fsSL https://opencode.ai/v2/install | bash -s -- --version 0.0.0-beta-17236
+    curl -fsSL https://raw.githubusercontent.com/anomalyco/opencode/dev/install | bash -s -- --server
     ./install --binary /path/to/opencode
 EOF
 }
@@ -30,6 +33,9 @@ EOF
 requested_version=${VERSION:-}
 no_modify_path=false
 binary_path=""
+configure_server=false
+server_port=4096
+server_url=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -52,6 +58,19 @@ while [[ $# -gt 0 ]]; do
                 shift 2
             else
                 echo -e "${RED}Error: --binary requires a path argument${NC}"
+                exit 1
+            fi
+            ;;
+        --server)
+            configure_server=true
+            shift
+            ;;
+        --server-port)
+            if [[ -n "${2:-}" ]]; then
+                server_port="$2"
+                shift 2
+            else
+                echo -e "${RED}Error: --server-port requires a port argument${NC}"
                 exit 1
             fi
             ;;
@@ -365,6 +384,57 @@ else
 fi
 install_legacy_shim
 
+installed_binary_path() {
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*) echo "$INSTALL_DIR/$APP.exe" ;;
+        *) echo "$INSTALL_DIR/$APP" ;;
+    esac
+}
+
+# The managed server owns its credential, so the install never puts a password
+# on a command line. The service generates one and stores it next to the
+# service config the first time it listens.
+configure_local_server() {
+    local port="$1"
+    local binary
+    binary=$(installed_binary_path)
+
+    if [ ! -x "$binary" ]; then
+        print_message warning "Installed binary not found at $binary; skipping the server setup."
+        return 0
+    fi
+
+    if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+        print_message warning "Invalid port: $port; skipping the server setup."
+        return 0
+    fi
+
+    print_message info "\n${MUTED}Setting up the local background server${NC}"
+
+    if ! "$binary" service set hostname 127.0.0.1 >/dev/null 2>&1; then
+        print_message warning "Could not set the server hostname; skipping the server setup."
+        return 0
+    fi
+
+    if ! "$binary" service set port "$port" >/dev/null 2>&1; then
+        print_message warning "Could not set the server port to $port; skipping the server setup."
+        return 0
+    fi
+
+    server_url=$("$binary" service start 2>/dev/null | tr -d '\r' | grep -m1 . || true)
+    if [ -z "$server_url" ]; then
+        print_message warning "The background server did not start. Start it later with: opencode service start"
+        return 0
+    fi
+
+    print_message info "Server listening on ${MUTED}$server_url${NC}"
+    print_message info "Password: ${MUTED}opencode service get password${NC}"
+}
+
+if [ "$configure_server" = "true" ]; then
+    configure_local_server "$server_port"
+fi
+
 
 add_to_path() {
     local config_file=$1
@@ -462,6 +532,11 @@ echo -e ""
 echo -e "cd <project>  ${MUTED}# Open directory${NC}"
 echo -e "opencode      ${MUTED}# Run command${NC}"
 echo -e ""
+if [ -n "$server_url" ]; then
+    echo -e "${MUTED}Background server:${NC} $server_url"
+    echo -e "${MUTED}Password:${NC} opencode service get password"
+    echo -e ""
+fi
 echo -e "${MUTED}For more information visit ${NC}https://opencode.ai/v2/docs"
 echo -e ""
 echo -e ""

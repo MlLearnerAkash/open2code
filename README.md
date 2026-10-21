@@ -43,6 +43,69 @@
 
 ---
 
+### Configure a Remote System
+
+1. **Remote machine** — install opencode, then start the server:
+   ```bash
+   export OPENCODE_SERVER_PASSWORD=your-secret
+   opencode serve --hostname 0.0.0.0 --port 4096
+   ```
+2. **Firewall** — allow inbound TCP on port `4096`.
+3. **Your machine** — connect to it:
+   ```bash
+   opencode --server http://REMOTE_IP:4096
+   ```
+   It prompts for the password set above. Sessions now run on the remote machine.
+
+### Install with a preconfigured local server
+
+The installer can set up and start the local background server in the same run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/MlLearnerAkash/open2code/server-failover/install | bash -s -- --server
+```
+
+The server is bound to `127.0.0.1:4096` with a generated password, both stored in
+`~/.config/opencode/service.json`. Pass `--server-port <port>` to use a different port.
+
+```bash
+opencode service status       # where the server is listening
+opencode service get password # the generated password
+opencode service stop         # stop the background server
+```
+
+### Failover Setup over SSH (step by step)
+
+1. **SSH access** — add a host alias in `~/.ssh/config` and verify key-based, prompt-free access:
+   ```sshconfig
+   Host portulica
+     HostName 24.176.198.155
+     User opervu
+   ```
+   ```bash
+   ssh -o BatchMode=yes portulica true   # must exit silently, no password prompt
+   ```
+2. **Cloud** — install opencode v2 (the default installer ships v1): `curl -fsSL https://opencode.ai/v2/install | bash`
+3. **Local config** — create `~/.config/open2code/failover.json`:
+   ```jsonc
+   {
+     "prefer": "local",
+     "failback": true,
+     "listen": { "host": "127.0.0.1", "port": 4000 },
+     "local": { "mode": "service", "port": 4096 },
+     "cloud": { "ssh": "portulica", "remoteHost": "127.0.0.1", "remotePort": 4096, "tunnelPort": 4097 }
+   }
+   ```
+4. **Run** — `./failover/bin/open2code.mjs` (the TUI connects to `127.0.0.1:4000`; the supervisor tunnels to the cloud via `ssh -L 4097` and fails over automatically).
+5. **Check** — `curl -s http://127.0.0.1:4000/__open2code/status | jq`
+
+Full reference: [`failover/README.md`](./failover/README.md).
+
+<details>
+<summary>Original</summary>
+
+---
+
 ### Installation
 
 ```bash
@@ -127,3 +190,5 @@ If you are working on a project that's related to OpenCode and is using "opencod
 ---
 
 **Join our community** [Discord](https://discord.gg/opencode) | [X.com](https://x.com/opencode)
+
+</details>
