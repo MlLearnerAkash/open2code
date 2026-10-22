@@ -54,10 +54,14 @@ not a safe thing to build on SQLite.
 
 ### 1. Cloud server
 
-The cloud installer does the whole server side in one command: it installs
-`opencode` from GitHub, points the server at `127.0.0.1:4096` with a generated
-password, runs it as a systemd user service, and makes sure the SSH server
-accepts the laptop's key.
+The standby can be any SSH-reachable machine. The cloud installer automates a
+Linux box with systemd; see [Connecting a new system](#connecting-a-new-system)
+for other platforms and for switching hosts later.
+
+On that machine, the installer does the whole server side in one command: it
+installs `opencode` from GitHub, points the server at `127.0.0.1:4096` with a
+generated password, runs it as a systemd user service, and makes sure the SSH
+server accepts the laptop's key.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/MlLearnerAkash/open2code/server-failover/failover/cloud/install | bash -s -- --ssh-user opervu
@@ -146,6 +150,110 @@ Check status at any time:
 curl -s http://127.0.0.1:4000/__open2code/status | jq
 ```
 
+## Connecting a new system
+
+The standby is any machine you can reach over SSH: a cloud VM, a homelab server,
+or another laptop. Nothing is tied to a specific provider — the supervisor only
+needs an SSH alias, the server's loopback address, and its password.
+
+### Linux with systemd (one command)
+
+Run the installer on the new machine. It installs OpenCode v2, starts the server
+on `127.0.0.1:4096` with a generated password, installs the systemd user unit,
+and authorizes the laptop's SSH key.
+
+```sh
+ssh new-host
+curl -fsSL https://raw.githubusercontent.com/MlLearnerAkash/open2code/server-failover/failover/cloud/install | bash -s -- \
+  --ssh-user "$(id -un)" \
+  --ssh-alias open2code-cloud
+```
+
+- `--ssh-user`, `--ssh-host`, `--ssh-port`, `--ssh-alias` describe how the
+  laptop reaches this machine; the defaults are the current user, the detected
+  public IP, port 22, and `open2code-cloud`.
+- `--pubkey "$(cat ~/.ssh/id_ed25519.pub)"` authorizes an existing laptop key
+  instead of generating a new keypair on the server.
+- `--server-port`, `--password` override the server port and password.
+- `--no-systemd` and `--no-ssh` skip those steps when the machine is managed
+  elsewhere.
+
+The installer prints the private-key copy step (when it generated a keypair),
+the `~/.ssh/config` block, and the `failover.json` for the laptop. Copy the key
+if there is one, add the block, then set `cloud.ssh` to the alias and
+`cloud.password` to the printed password:
+
+```jsonc
+{
+  "prefer": "local",
+  "local": { "mode": "service" },
+  "cloud": {
+    "ssh": "open2code-cloud",
+    "password": "the-password-printed-by-the-installer",
+    "remotePort": 4096,
+    "tunnelPort": 4097,
+    "start": "systemctl --user start opencode",
+    "stop": "systemctl --user stop opencode"
+  }
+}
+```
+
+Verify before launching: `ssh -o BatchMode=yes open2code-cloud true` must exit
+silently, and `ssh -o BatchMode=yes open2code-cloud 'curl -s -o /dev/null -w %{http_code} -u opencode:PASSWORD http://127.0.0.1:4096/api/info'`
+should print `200`.
+
+### Other systems (no systemd)
+
+The installer only targets Linux with systemd. For macOS, BSD, a container, or a
+machine where you do not want a service, set the system up by hand:
+
+1. Install OpenCode v2 (`curl -fsSL https://opencode.ai/v2/install | bash`).
+2. Start the server on loopback with a chosen password, either continuously by
+   hand or under the machine's own supervisor:
+   ```sh
+   export OPENCODE_SERVER_PASSWORD=choose-a-secret
+   opencode serve --hostname 127.0.0.1 --port 4096
+   ```
+3. Make sure the laptop can run commands non-interactively:
+   `ssh -o BatchMode=yes <alias> 'command -v gzip && { command -v sqlite3 || command -v python3; }'`
+   must print paths, since snapshots need `gzip` plus `sqlite3` or Python 3.
+4. Add the alias to `~/.ssh/config`, then set `cloud.ssh`, `cloud.password`,
+   `remoteHost`, and `remotePort` in `failover.json`. If the machine runs the
+   server under its own supervisor (launchd, a container restart policy), set
+   `cloud.start` and `cloud.stop` to the commands that control it. Leave them
+   unset to let the failover supervisor start and stop its own `opencode serve`
+   over SSH.
+
+### Switching to a different system
+
+When moving the standby to another machine:
+
+1. Run the installer (or manual setup) on the new machine and update
+   `cloud.ssh` and `cloud.password` in `~/.config/open2code/failover.json`.
+   Keep `cloud.remotePort` in step if the server does not use `4096`.
+2. Stop the running supervisor so it re-reads the config:
+   ```sh
+   pkill -f failover/bin/supervisor.mjs
+   ```
+3. Relaunch `./failover/bin/open2code.mjs` and check
+   `curl -s http://127.0.0.1:4000/__open2code/status | jq` shows the new host
+   healthy.
+
+Two details can bite when switching:
+
+- **Password state wins over a stale config.** A generated password is persisted
+  as `cloudPassword` in `~/.local/state/open2code/failover.json` and is reused
+  when `cloud.password` is absent. After switching hosts, either set
+  `cloud.password` explicitly or remove the `cloudPassword` entry so the next
+  start generates a new one.
+- **`cloud.tunnelPort` is local.** It must be free, and it must differ if you run
+  more than one failover supervisor on the laptop.
+
+To try a host for a single launch without editing the config, use
+`./failover/bin/open2code.mjs --ssh <alias>` (or set `OPEN2CODE_CLOUD_SSH`);
+stop the supervisor first if one is already running, since the override applies
+when the supervisor starts.
+
 ## Show the cloud host in the TUI
 
 `failover/plugin/open2code-ssh` is a TUI plugin that prints `ssh <host>` in the
@@ -177,7 +285,7 @@ Launch through `open2code` to see it.
 | `cloud.sshPort` / `cloud.sshArgs` | — | Passed to `ssh`. |
 | `cloud.remoteHost` / `cloud.remotePort` | `127.0.0.1` / `4096` | Cloud server address reachable from the cloud host. |
 | `cloud.tunnelPort` | `4097` | Local port for the SSH forward. |
-| `cloud.password` | generated | Cloud server password; persisted in the state file when generated. |
+| `cloud.password` | generated | Cloud server password; persisted in the state file when generated. Set it explicitly when connecting a new system so the stored one is not reused. |
 | `cloud.db` | `~/.local/share/opencode/opencode.db` | Cloud database path. |
 | `cloud.start` / `cloud.stop` | built-in `serve` | Commands run on the cloud (e.g. `systemctl --user start opencode`). |
 

@@ -76,7 +76,12 @@ opencode service stop         # stop the background server
 
 ### Failover Setup over SSH (step by step)
 
-1. **SSH access** — add a host alias in `~/.ssh/config` and verify key-based, prompt-free access:
+The standby can be any machine you can reach over SSH — a cloud VM, a homelab
+host, or another laptop. The one-command installer targets Linux with systemd;
+for other systems follow the manual steps in
+[`failover/README.md`](./failover/README.md#connecting-a-new-system).
+
+1. **SSH access** — pick the host, add a host alias in `~/.ssh/config`, and verify key-based, prompt-free access:
    ```sshconfig
    Host portulica
      HostName 24.176.198.155
@@ -85,23 +90,49 @@ opencode service stop         # stop the background server
    ```bash
    ssh -o BatchMode=yes portulica true   # must exit silently, no password prompt
    ```
-2. **Cloud** — run the cloud installer on the server. It installs opencode v2, configures the server on `127.0.0.1:4096` with a generated password, runs it as a systemd user service, and sets up SSH key access:
+2. **New system** — run the cloud installer on that machine. It installs opencode v2, configures the server on `127.0.0.1:4096` with a generated password, runs it as a systemd user service, and sets up SSH key access:
    ```bash
    curl -fsSL https://raw.githubusercontent.com/MlLearnerAkash/open2code/server-failover/failover/cloud/install | bash -s -- --ssh-user opervu
    ```
-   It prints the `~/.ssh/config` block and the `failover.json` to copy to your laptop.
-3. **Local config** — create `~/.config/open2code/failover.json`:
+   Use `--ssh-alias`, `--ssh-host`, and `--ssh-port` when the defaults do not match the new system. It prints the `~/.ssh/config` block and the `failover.json` to copy to your laptop.
+3. **Local config** — create `~/.config/open2code/failover.json` on your laptop, using the `ssh` alias and `password` the installer printed:
    ```jsonc
    {
      "prefer": "local",
      "failback": true,
      "listen": { "host": "127.0.0.1", "port": 4000 },
      "local": { "mode": "service", "port": 4096 },
-     "cloud": { "ssh": "portulica", "remoteHost": "127.0.0.1", "remotePort": 4096, "tunnelPort": 4097 }
+     "cloud": {
+       "ssh": "portulica",
+       "password": "<password printed by the installer>",
+       "remoteHost": "127.0.0.1",
+       "remotePort": 4096,
+       "tunnelPort": 4097
+     }
    }
    ```
-4. **Run** — `./failover/bin/open2code.mjs` (the TUI connects to `127.0.0.1:4000`; the supervisor tunnels to the cloud via `ssh -L 4097` and fails over automatically).
+4. **Run** — `./failover/bin/open2code.mjs` (the TUI connects to `127.0.0.1:4000`; the supervisor tunnels to the system via `ssh -L 4097` and fails over automatically).
 5. **Check** — `curl -s http://127.0.0.1:4000/__open2code/status | jq`
+
+### Point failover at a different system
+
+To move the standby to another machine, run the installer on the new machine,
+then on your laptop:
+
+1. Update `cloud.ssh` (and `cloud.password` if the new machine printed a new one)
+   in `~/.config/open2code/failover.json`.
+2. Stop the running supervisor so it re-reads the config:
+   ```bash
+   pkill -f failover/bin/supervisor.mjs
+   ```
+3. Relaunch `./failover/bin/open2code.mjs` and confirm the new host with
+   `curl -s http://127.0.0.1:4000/__open2code/status | jq`.
+
+The supervisor reuses the generated password stored in
+`~/.local/state/open2code/failover.json`, so set `cloud.password` explicitly for
+the new system, or remove the `cloudPassword` entry there to have one generated
+on the next start. To try a host for a single launch without editing the config,
+use `./failover/bin/open2code.mjs --ssh <alias>`.
 
 Full reference: [`failover/README.md`](./failover/README.md).
 
