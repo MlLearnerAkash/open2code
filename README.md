@@ -43,6 +43,104 @@
 
 ---
 
+### Configure a Remote System
+
+1. **Remote machine** — install opencode, then start the server:
+   ```bash
+   export OPENCODE_SERVER_PASSWORD=your-secret
+   opencode serve --hostname 0.0.0.0 --port 4096
+   ```
+2. **Firewall** — allow inbound TCP on port `4096`.
+3. **Your machine** — connect to it:
+   ```bash
+   opencode --server http://REMOTE_IP:4096
+   ```
+   It prompts for the password set above. Sessions now run on the remote machine.
+
+### Install with a preconfigured local server
+
+The installer can set up and start the local background server in the same run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/MlLearnerAkash/open2code/server-failover/install | bash -s -- --server
+```
+
+The server is bound to `127.0.0.1:4096` with a generated password, both stored in
+`~/.config/opencode/service.json`. Pass `--server-port <port>` to use a different port.
+
+```bash
+opencode service status       # where the server is listening
+opencode service get password # the generated password
+opencode service stop         # stop the background server
+```
+
+### Failover Setup over SSH (step by step)
+
+The standby can be any machine you can reach over SSH — a cloud VM, a homelab
+host, or another laptop. The one-command installer targets Linux with systemd;
+for other systems follow the manual steps in
+[`failover/README.md`](./failover/README.md#connecting-a-new-system).
+
+1. **SSH access** — pick the host, add a host alias in `~/.ssh/config`, and verify key-based, prompt-free access:
+   ```sshconfig
+   Host portulica
+     HostName 24.176.198.155
+     User opervu
+   ```
+   ```bash
+   ssh -o BatchMode=yes portulica true   # must exit silently, no password prompt
+   ```
+2. **New system** — run the cloud installer on that machine. It installs opencode v2, configures the server on `127.0.0.1:4096` with a generated password, runs it as a systemd user service, and sets up SSH key access:
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/MlLearnerAkash/open2code/server-failover/failover/cloud/install | bash -s -- --ssh-user opervu
+   ```
+   Use `--ssh-alias`, `--ssh-host`, and `--ssh-port` when the defaults do not match the new system. It prints the `~/.ssh/config` block and the `failover.json` to copy to your laptop.
+3. **Local config** — create `~/.config/open2code/failover.json` on your laptop, using the `ssh` alias and `password` the installer printed:
+   ```jsonc
+   {
+     "prefer": "local",
+     "failback": true,
+     "listen": { "host": "127.0.0.1", "port": 4000 },
+     "local": { "mode": "service", "port": 4096 },
+     "cloud": {
+       "ssh": "portulica",
+       "password": "<password printed by the installer>",
+       "remoteHost": "127.0.0.1",
+       "remotePort": 4096,
+       "tunnelPort": 4097
+     }
+   }
+   ```
+4. **Run** — `./failover/bin/open2code.mjs` (the TUI connects to `127.0.0.1:4000`; the supervisor tunnels to the system via `ssh -L 4097` and fails over automatically).
+5. **Check** — `curl -s http://127.0.0.1:4000/__open2code/status | jq`
+
+### Point failover at a different system
+
+To move the standby to another machine, run the installer on the new machine,
+then on your laptop:
+
+1. Update `cloud.ssh` (and `cloud.password` if the new machine printed a new one)
+   in `~/.config/open2code/failover.json`.
+2. Stop the running supervisor so it re-reads the config:
+   ```bash
+   pkill -f failover/bin/supervisor.mjs
+   ```
+3. Relaunch `./failover/bin/open2code.mjs` and confirm the new host with
+   `curl -s http://127.0.0.1:4000/__open2code/status | jq`.
+
+The supervisor reuses the generated password stored in
+`~/.local/state/open2code/failover.json`, so set `cloud.password` explicitly for
+the new system, or remove the `cloudPassword` entry there to have one generated
+on the next start. To try a host for a single launch without editing the config,
+use `./failover/bin/open2code.mjs --ssh <alias>`.
+
+Full reference: [`failover/README.md`](./failover/README.md).
+
+<details>
+<summary>Original</summary>
+
+---
+
 ### Installation
 
 ```bash
@@ -127,3 +225,5 @@ If you are working on a project that's related to OpenCode and is using "opencod
 ---
 
 **Join our community** [Discord](https://discord.gg/opencode) | [X.com](https://x.com/opencode)
+
+</details>
